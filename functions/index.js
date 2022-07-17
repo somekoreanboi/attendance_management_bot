@@ -18,7 +18,6 @@ const privateKey = fs.readFileSync("jwtRS256.key");
 
 let accessToken = "";
 let refreshToken = "";
-console.log(refreshToken);
 let bearer = "";
 
 let gotInitialToken = false;
@@ -34,6 +33,7 @@ app.post("/receive", (req, res) => {
 
     if (getWorkStartTimeMod) {
       getWorkStartTimeMod = false;
+      getWorkEndTimeMod = true;
       sendMessage(userId, {
         "content": {
           "type": "text",
@@ -43,13 +43,14 @@ app.post("/receive", (req, res) => {
       });
       const startTime = parseTime(req.body.content.text);
       console.log(startTime);
-      getWorkEndTimeMod = true;
+      return;
     }
 
     if (getWorkEndTimeMod) {
       getWorkEndTimeMod = false;
       const endTime = parseTime(req.body.content.text);
       console.log(endTime);
+      return;
     }
 
     if (req.body.type == "join") {
@@ -60,6 +61,7 @@ app.post("/receive", (req, res) => {
           "text": "근태 관리 봇의 첫 이용을 환영합니다! /n하단의 메뉴에서(PC의 경우 좌측 하단의 작은 선 세개), 이용하시고 싶은 서비스를 선택해주세요. \n문의 사항이 있으시다면 해외데이터팀의 임재원 사원에게 문의 부탁드립니다!",
         },
       });
+      return;
     }
 
     // Postback type 콜백 케이스
@@ -74,8 +76,7 @@ app.post("/receive", (req, res) => {
                 "type": "message",
                 "label": "일반 휴가 신청",
                 "postback": "normal_break",
-                // "text": "일반 휴가를 신청하고 싶어요.",
-                "text": refreshToken,
+                "text": "일반 휴가를 신청하고 싶어요.",
               }, {
                 "type": "message",
                 "label": "병가 신청",
@@ -84,6 +85,7 @@ app.post("/receive", (req, res) => {
               }],
           },
         });
+        return;
       }
 
       if (req.body.data == "연장 근로 신청을 누르셨습니다.") {
@@ -109,6 +111,7 @@ app.post("/receive", (req, res) => {
           console.log(error.message);
           getNewToken();
         });
+        return;
       }
     }
 
@@ -125,6 +128,7 @@ app.post("/receive", (req, res) => {
         });
 
         console.log("휴일 연장근로");
+        return;
       }
 
       if (req.body.content.postback == "non_holiday_work") {
@@ -462,6 +466,7 @@ function parseTime(str) {
   }
 }
 
-
 // /api prefix를 가지는 요청을 express 라우터로 전달
-exports.bot = functions.region("asia-northeast3").https.onRequest(app);
+exports.bot = functions.region("asia-northeast3").runWith({
+  minInstances: 2,
+}).https.onRequest(app);
