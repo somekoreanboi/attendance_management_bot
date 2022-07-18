@@ -1,3 +1,4 @@
+/* eslint-disable guard-for-in */
 /* eslint-disable max-len */
 /* eslint-disable require-jsdoc */
 const functions = require("firebase-functions");
@@ -5,35 +6,46 @@ const express = require("express");
 const request = require("request-promise");
 const fs = require("fs");
 const app = express();
-const jwt = require("jsonwebtoken");
+// const jwt = require("jsonwebtoken");
+const {initializeApp} = require("firebase-admin/app");
+const {getFirestore} = require("firebase-admin/firestore");
 
 
-const tokenUrl = "https://auth.worksmobile.com/oauth2/v2.0/token";
+// const tokenUrl = "https://auth.worksmobile.com/oauth2/v2.0/token";
 const boturl = "https://www.worksapis.com/v1.0/bots/3930684";
+const userUrl = "https://www.worksapis.com/v1.0/users";
 
-const clientId = "xxj5ARzzVw5k1H2_WgZC";
-const clientSecret = "6Hu3OP9qxy";
-const serviceAccount = "944ny.serviceaccount@corisetec.com";
-const privateKey = fs.readFileSync("jwtRS256.key");
+// const clientId = "xxj5ARzzVw5k1H2_WgZC";
+// const clientSecret = "6Hu3OP9qxy";
+// const serviceAccount = "944ny.serviceaccount@corisetec.com";
+// const privateKey = fs.readFileSync("jwtRS256.key");
 
 let accessToken = "";
-let refreshToken = "";
-let bearer = "";
+const bearer = "";
 
-let gotInitialToken = false;
+initializeApp();
 
-let getWorkStartTimeMod = false;
-let getWorkEndTimeMod = false;
 
 // 봇이 메시지를 수신할경우 콜백
-app.post("/receive", (req, res) => {
-  getToken().then(()=> {
-    console.log(req.body);
-    const userId = req.body.source.userId;
+app.post("/receive", async (req, res) => {
+  await getToken();
+  console.log(req.body);
+  const userId = req.body.source.userId;
+  const db = getFirestore();
+  let userData = null;
+  console.log("aaaaaaaaaaaaaaaaaa");
+  db.collection("users").doc(userId).get().then((doc)=>{
+    userData = doc.data();
+    console.log(userData);
+    if (userData.get_start_time_mod) {
+      db.collection("users").doc(userId).set({
+        "get_start_time_mod": false,
+        "get_end_time_mod": true,
+      }, {
+        merge: true,
+      },
+      );
 
-    if (getWorkStartTimeMod) {
-      getWorkStartTimeMod = false;
-      getWorkEndTimeMod = true;
       sendMessage(userId, {
         "content": {
           "type": "text",
@@ -46,8 +58,13 @@ app.post("/receive", (req, res) => {
       return;
     }
 
-    if (getWorkEndTimeMod) {
-      getWorkEndTimeMod = false;
+
+    if (userData.get_end_time_mod) {
+      db.collection("users").doc(userId).set({
+        "get_end_time_mod": false,
+      }), {
+        merge: true,
+      };
       const endTime = parseTime(req.body.content.text);
       console.log(endTime);
       return;
@@ -67,6 +84,7 @@ app.post("/receive", (req, res) => {
     // Postback type 콜백 케이스
     if (req.body.type == "postback") {
       if (req.body.data == "휴가신청을 누르셨습니다.") {
+        initUserMods(userId);
         sendMessage(userId, {
           "content": {
             "type": "button_template",
@@ -89,6 +107,7 @@ app.post("/receive", (req, res) => {
       }
 
       if (req.body.data == "연장 근로 신청을 누르셨습니다.") {
+        initUserMods(userId);
         sendMessage(userId,
             {
               "content": {
@@ -107,9 +126,8 @@ app.post("/receive", (req, res) => {
                     "text": "비휴일 연장근로를 신청하고 싶어요.",
                   }],
               },
-            }).catch((error)=> {
+            }).catch((error) => {
           console.log(error.message);
-          getNewToken();
         });
         return;
       }
@@ -118,7 +136,11 @@ app.post("/receive", (req, res) => {
     // 메시지 타입인 경우(버튼 선택한 경우) 콜백 케이스
     if (req.body.type == "message") {
       if (req.body.content.postback == "holiday_work") {
-        getWorkStartTimeMod = true;
+        db.collection("users").doc(userId).set({
+          "get_start_time_mod": true,
+        }, {
+          merge: true,
+        });
         sendMessage(userId, {
           "content": {
             "type": "text",
@@ -147,6 +169,19 @@ app.post("/receive", (req, res) => {
 });
 
 
+function initUserMods(userId) {
+  db.collection("users").doc(userId).set({
+    "get_start_time_mod": false,
+    "get_end_time_mod": false,
+    "get_start_date_mod": false,
+    "get_end_date_mod": false,
+    "get_file_mod": false,
+  }, {
+    merge: true,
+  });
+}
+
+
 /**
  * Send message to the user
  * @param {string} userId the id of the user
@@ -158,7 +193,8 @@ function sendMessage(userId, message) {
     uri: boturl + "/users/" + userId + "/messages",
     headers: {
       "Authorization": bearer,
-      "Content-Type": "application/json"},
+      "Content-Type": "application/json",
+    },
     method: "POST",
     json: message,
   });
@@ -169,81 +205,88 @@ function sendMessage(userId, message) {
  * Get Initial Access Token
  * @return {Promise} the result promise of the request.
  */
-function getToken() {
-  // 이미 받았으면 아무것도 하지 말기
-  if (gotInitialToken) {
-    return new Promise((resolve, reject) => {});
+async function getToken() {
+  while (!keepInit
+
+  ) {
+    setTimeout(function() {
+      console.log("waiting");
+    }, 100);
   }
-  // JWT 토큰 생성
-  const token = jwt.sign(
-      {
-        "iss": clientId,
-        "sub": serviceAccount,
-        "iat": parseInt(Date.now() / 1000),
-        "exp": parseInt(Date.now() / 1000) + 3600,
-      }, privateKey,
-      {
-        algorithm: "RS256",
-      });
-
-
-  // Access Token 리퀘스트 바디
-  const data = {
-    "assertion": token,
-    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-    "client_id": clientId,
-    "client_secret": clientSecret,
-    // eslint-disable-next-line max-len
-    "scope": "bot,bot.read,user.read,user,user.email.read,calendar,calendar.read,contact,contact.read",
-  };
-
-  return request.post({
-    uri: tokenUrl,
-    headers: {"Content-Type": "application/x-www-form-urlencoded=UTF-8"},
-    method: "POST",
-    formData: data,
-  },
-  (error, response, body) => {
-    repeatRefresh();
-    gotInitialToken = true;
-    accessToken = JSON.parse(body).access_token;
-    refreshToken = JSON.parse(body).refresh_token;
-    bearer = "Bearer " + accessToken;
+  console.log("getToken executed!");
+  return await db.collection("token").doc("access_token").get((doc) => {
+    console.log(accessToken);
+    console.log("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    console.log(doc.data());
+    accessToken = doc.data().value;
+  }).catch((error)=> {
+    console.log("ccccccccccccccccccccccccccccccccccccccccc");
+    console.log(error.message);
   });
 }
+// function getToken() {
+//   // JWT 토큰 생성
+//   const token = jwt.sign(
+//       {
+//         "iss": clientId,
+//         "sub": serviceAccount,
+//         "iat": parseInt(Date.now() / 1000),
+//         "exp": parseInt(Date.now() / 1000) + 3600,
+//       }, privateKey,
+//       {
+//         algorithm: "RS256",
+//       });
+
+
+//   // Access Token 리퀘스트 바디
+//   const data = {
+//     "assertion": token,
+//     "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+//     "client_id": clientId,
+//     "client_secret": clientSecret,
+//     // eslint-disable-next-line max-len
+//     "scope": "bot,bot.read,user.read,user,user.email.read,calendar,calendar.read,contact,contact.read",
+//   };
+
+//   return request.post({
+//     uri: tokenUrl,
+//     headers: {"Content-Type": "application/x-www-form-urlencoded=UTF-8"},
+//     method: "POST",
+//     formData: data,
+//   },
+//   (error, response, body) => {
+//     repeatRefresh();
+//     gotInitialToken = true;
+//     accessToken = JSON.parse(body).access_token;
+//     refreshToken = JSON.parse(body).refresh_token;
+//     bearer = "Bearer " + accessToken;
+//   });
+// }
 
 
 /**
- * Get new token using refresh token
+ * Get User list
  * @return {Promise} the result promise of the request.
  */
-function getNewToken() {
-  return request.post({
-    uri: boturl,
+function getUsers() {
+  return request.get({
+    uri: userUrl,
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded"},
-    method: "POST",
-    formData: {
-      "refresh_token": refreshToken,
-      "grant_type": "refresh_token",
-      "client_id": clientId,
-      "client_secret": clientSecret},
+      "Authorization": bearer,
+    },
+    method: "GET",
   },
   (error, response, body) => {
-    accessToken = JSON.parse(body).access_token;
+    const users = JSON.parse(body).users;
+    for (const user of users) {
+      console.log(user.userId);
+      const docRef = db.collection("users").doc(user.userId);
+      docRef.set(user), {
+        merge: true,
+      };
+    }
   });
 }
-
-/**
- * Keep updating token every 23 hours
- */
-function repeatRefresh() {
-  if (gotInitialToken) {
-    getNewToken();
-  }
-  setTimeout(repeatRefresh, 82800 * 1000);
-}
-
 
 /**
  * Modify Bot
@@ -254,7 +297,8 @@ function modifyBot() {
     uri: boturl,
     headers: {
       "Authorization": bearer,
-      "Content-Type": "application/json"},
+      "Content-Type": "application/json",
+    },
     method: "PATCH",
     json: {
       "defaultRichmenuId": "144561",
@@ -275,7 +319,8 @@ function getUploadLink(fileName) {
     uri: boturl + "/attachments",
     headers: {
       "Authorization": bearer,
-      "Content-Type": "application/json"},
+      "Content-Type": "application/json",
+    },
     method: "POST",
     json: {
       "fileName": fileName,
@@ -300,7 +345,8 @@ function uploadFile(uploadUrl, fileName) {
     uri: uploadUrl,
     headers: {
       "Authorization": bearer,
-      "Content-Type": "multipart/form-data"},
+      "Content-Type": "multipart/form-data",
+    },
     method: "POST",
     formData: {
       "title": fileName,
@@ -394,10 +440,12 @@ function setRichImage() {
     uri: boturl + "/richmenus/144569/image",
     headers: {
       "Authorization": bearer,
-      "Content-Type": "application/json"},
+      "Content-Type": "application/json",
+    },
     method: "POST",
     json: {
-      "fileId": "kr1.1658043106986968991.1658129506.1.3930684.0.0.0"},
+      "fileId": "kr1.1658043106986968991.1658129506.1.3930684.0.0.0",
+    },
   },
   (error, response, body) => {
     console.log(body);
@@ -428,7 +476,8 @@ function deleteRichMenu(richMenuId) {
   return request.delete({
     uri: boturl + "/richmenus/" + richMenuId.toString(),
     headers: {
-      "Authorization": bearer},
+      "Authorization": bearer,
+    },
     method: "DELETE",
   },
   (error, response, body) => {
@@ -446,7 +495,8 @@ function changeRichMenu(richMenuId, userId) {
   return request.post({
     uri: boturl + "/richmenus/" + richMenuId + "/users/" + userId,
     headers: {
-      "Authorization": bearer},
+      "Authorization": bearer,
+    },
     method: "POST",
   },
   (error, response, body) => {
@@ -460,7 +510,7 @@ function parseTime(str) {
     const month = str.substring(4, 6);
     const day = str.substring(6, 8);
     const hour = str.substring(8, 10);
-    return new Date(year, month-1, day, hour);
+    return new Date(year, month - 1, day, hour);
   } catch (error) {
     return Date.now;
   }
